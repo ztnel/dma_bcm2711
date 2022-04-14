@@ -1,4 +1,12 @@
 
+
+
+def interleave():
+    for i in range(100):
+        print(i%2+i)
+        print(i%2+i+1)
+
+interleave()
 page_size = 4096
 base_addr = 0xFE000002
 size = 10 

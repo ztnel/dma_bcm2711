@@ -21,7 +21,7 @@ static dma_mem_t *dma_cbs;
 static dma_mem_t *dma_ticks;
 static volatile dma_reg_t *dma_reg;
 
-static inline dma_cb_t *get_cb(int offset) { return (dma_cb_t *)(dma_cbs->v_addr + offset); }
+static inline dma_cb_t *get_cb(int offset) { return (dma_cb_t *)(dma_cbs->v_addr) + offset; }
 static inline uint32_t get_cb_bus_addr(int offset) { return dma_cbs->b_addr + offset * sizeof(dma_cb_t); }
 static inline uint32_t *get_tick_virt_addr(int offset) { return (uint32_t *)dma_ticks->v_addr + offset; }
 static inline uint32_t get_tick_bus_addr(int offset) { return dma_ticks->b_addr + offset * sizeof(uint32_t); }

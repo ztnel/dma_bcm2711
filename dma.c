@@ -19,7 +19,11 @@
 static int mailbox_fd = -1;
 static dma_mem_t *dma_cbs;
 static dma_mem_t *dma_ticks;
+
+// Registers
 static volatile dma_reg_t *dma_reg;
+static volatile pwm_reg_t *pwm_reg;
+static volatile clk_reg_t *clk_reg;
 
 static inline dma_cb_t *get_cb(int offset) { return (dma_cb_t *)(dma_cbs->v_addr) + offset; }
 static inline uint32_t get_cb_bus_addr(int offset) { return dma_cbs->b_addr + offset * sizeof(dma_cb_t); }
@@ -193,17 +197,65 @@ int dma_init(uint16_t cb_cnt, uint16_t ticks) {
   if (dma_cbs == NULL || dma_ticks == NULL)
     return 1;
   sleep(0.5); // is this required?
-  // populate dma control blocks
+  // populate interleaved dma control blocks with DREQ enabled delay blocks
   for (int i = 0; i < ticks; i++) {
-    cb = get_cb(i);
+    // tick control block
+    cb = get_cb(2 * i);
     cb->ti = DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP;
-    cb->src = BCM2711_PERI_BASE + SYST_BASE + SYST_CLO;
+    cb->src = SYST_CLO;
     cb->dest = get_tick_bus_addr(i);
     cb->len = 4;
-    cb->next = get_cb_bus_addr((i + 1) % cb_cnt);
+    cb->next = get_cb_bus_addr((2 * i + 1) % cb_cnt);
+    // delay control block
+    cb = get_cb(2 * i + 1);
+    cb->ti = DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP | DMA_DEST_DREQ | DMA_PERI_MAPPING(5);
+    cb->src = 0x0;  // not required
+    cb->dest = PWM_FIFO;
+    cb->len = 4;
+    cb->next = get_cb_bus_addr((2 * i + 2) % cb_cnt);
   }
   printf("Init: %d cbs, %d ticks\n", cb_cnt, ticks);
   return 0;
+}
+
+void init_hw_clk() {
+  // kill the clock if busy
+  if (clk_reg->ctl & CLK_CTL_BUSY) {
+    do {
+      clk_reg->ctl = CLK_CTL_KILL;
+    } while (clk_reg->ctl & CLK_CTL_BUSY);
+  }
+  // Set clock source to plld
+  clk_reg->ctl = CLK_CTL_SRC_PLLD;
+  sleep(0.5);
+  // The original clock speed is 500MHZ, we divide it by 5 to get a 100MHZ clock
+  clk_reg->div = CLK_DIV_DIVI(CLK_DIVI);
+  sleep(0.5);
+  // Enable the clock
+  clk_reg->ctl |= CLK_CTL_ENAB;
+}
+
+void init_pwm() {
+  // reset PWM
+  pwm_reg->ctl = 0x0;
+  sleep(0.5);
+  pwm_reg->sta = -1;
+  sleep(0.5);
+  /*
+  * set number of bits to transmit
+  * e.g, if CLK_MICROS is 5, since we have set the frequency of the
+  * hardware clock to 100 MHZ, then the time taken for `100 * CLK_MICROS` bits
+  * is (500 / 100) = 5 us, this is how we control the DMA sampling rate
+  */
+  pwm_reg->rng1 = 100 * CLK_MICROS;
+  // enable PWM DMA, raise panic and dreq thresholds to 15
+  pwm_reg->dmac = PWM_DMAC_ENAB | PWM_DMAC_PANIC(15) | 15;
+  sleep(0.5);
+  // clear PWM fifo
+  pwm_reg->ctl = PWM_CTL_CLRF;
+  sleep(0.5);
+  // enable PWM channel 1 and use fifo
+  pwm_reg->ctl = PWM_CTL_USEF | PWM_CTL_MODE1 | PWM_CTL_PWEN1;
 }
 
 void dma_start() {
@@ -233,10 +285,18 @@ void dma_end() {
 }
 
 int main(void) {
-  int tick_cnt = 10;
-  uint8_t *dma_base_ptr = map_mem(BCM2711_PERI_BASE + DMA_BASE, PAGE_SIZE);
+  int tick_cnt = 20;
+  // map peripherals to virtual memory space
+  pwm_reg = map_mem(PWM_BASE, PWM_LEN);
+  uint8_t *dma_base_ptr = map_mem(DMA_BASE, PAGE_SIZE);
+  uint8_t *cm_base_ptr = map_mem(GPIO_CLK_BASE, GPIO_CLK_LEN);
+  clk_reg = (clk_reg_t *)(cm_base_ptr + GPIO_CLK_PWM);
   dma_reg = (dma_reg_t *)(dma_base_ptr + (DMA_CHANNEL * DMA_OFFSET));
-  dma_init(tick_cnt, tick_cnt);
+  dma_init(tick_cnt * 2, tick_cnt);
+  sleep(0.5);
+  init_hw_clk();
+  sleep(0.5);
+  init_pwm();
   sleep(0.5);
   dma_start();
   sleep(0.5);

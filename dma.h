@@ -36,16 +36,52 @@
  */
 #define PAGE_SIZE               4096
 #define BCM2711_PERI_BASE       0xFE000000
+#define BCM2711_PERI_BUS_BASE   0x7E000000
 #define BUS_TO_PHYS(x)          ((x) & 0x3FFFFFFF)
 
-#define SYST_BASE               (BCM2711_PERI_BASE + 0x00003000)
-#define SYST_LEN                0x1C
-#define SYST_CLO                0x04
+#define PWM_BASE                (BCM2711_PERI_BASE + 0x0020C000)
+#define PWM_BUS_BASE            (BCM2711_PERI_BUS_BASE + 0x0020C000)
+#define PWM_FIFO                (PWM_BUS_BASE + 0x18)
+#define PWM_LEN                 0x28
 
-#define DMA_BASE                0x00007000
-#define DMA_CHANNEL             6
+#define GPIO_CLK_BASE           (BCM2711_PERI_BASE + 0x00101000)
+#define GPIO_CLK_LEN            0xA8
+#define GPIO_CLK_PWM            0xA0
+
+// NOTE: the system timer base is defined relative to the bus address not the physical!
+#define SYST_BASE               (BCM2711_PERI_BUS_BASE + 0x00003000)
+#define SYST_LEN                0x1C
+#define SYST_CLO                (SYST_BASE + 0x04)
+
+#define DMA_BASE                (BCM2711_PERI_BASE + 0x00007000)
 #define DMA_OFFSET              0x100
-#define DMA_ADDR                (DMA_BASE + DMA_OFFSET * (DMA_CHANNEL >> 2))
+#define DMA_CHANNEL             6
+
+/**
+ * @brief GPIO Clock manager control and status bits
+ * 5.4. General Purpose GPIO Clocks
+ */
+#define CM_PASSWD               (0x5A << 24)
+#define CLK_CTL_KILL            (CM_PASSWD | (1 << 5))
+#define CLK_CTL_BUSY            (CM_PASSWD | (1 << 7))
+#define CLK_CTL_ENAB            (CM_PASSWD | (1 << 4))
+#define CLK_DIV_DIVI(x)         (CM_PASSWD | ((x) << 12))
+#define CLK_CTL_SRC_PLLD        (CM_PASSWD | 6)
+#define CLK_CTL_SRC_OSC         (CM_PASSWD | 1)
+#define CLK_DIVI                5
+#define CLK_MICROS              1
+
+/**
+ * @brief PWM Register control and status bits
+ * 8.6. Control and Status Registers
+ */
+#define PWM_DMAC_ENAB           (1 << 31)
+#define PWM_DMAC_PANIC(x)       ((x) << 8)
+#define PWM_CTL_CLRF            (1 << 6)
+#define PWM_CTL_USEF            (1 << 5)
+#define PWM_CTL_MODE1           (1 << 1)
+#define PWM_CTL_PWEN1           (1 << 0)
+
 
 /**
  * @brief DMA CS Control and Status bits
@@ -69,14 +105,8 @@
 #define DMA_NO_WIDE_BURSTS      (1 << 26)
 #define DMA_PERI_MAPPING(x)     ((x) << 16)
 #define DMA_BURST_LENGTH(x)     ((x) << 12)
-#define DMA_SRC_IGNORE          (1 << 11)
 #define DMA_SRC_DREQ            (1 << 10)
-#define DMA_SRC_WIDTH           (1 << 9)
-#define DMA_SRC_INC             (1 << 8)
-#define DMA_DEST_IGNORE         (1 << 7)
 #define DMA_DEST_DREQ           (1 << 6)
-#define DMA_DEST_WIDTH          (1 << 5)
-#define DMA_DEST_INC            (1 << 4)
 #define DMA_WAIT_RESP           (1 << 3)
 
 /**
@@ -97,6 +127,32 @@ typedef struct dma_reg_t {
   uint32_t cs;      // control / status register
   uint32_t cb;      // control block address 
 } dma_reg_t;
+
+/**
+ * @brief GPIO Clock register specification:
+ * 5.4. General Purpose GPIO Clocks (Table 98. General Purpose Clocks Registers)
+ */
+typedef struct clk_reg_t {
+  uint32_t ctl;     // control resgister
+  uint32_t div;     // divisor register
+} clk_reg_t;
+
+/**
+ * @brief PWM control channel specification:
+ * 8.6. Control and Status Registers (Table 152. PWM Register Map)
+ */
+typedef struct pwm_reg_t {
+  uint32_t ctl;     // control register
+  uint32_t sta;     // status register
+  uint32_t dmac;    // pwm dma configuration
+  uint32_t rsv1;    // 4 byte padding
+  uint32_t rng1;    // pwm channel 1 range
+  uint32_t dat1;    // pwm channel 1 data
+  uint32_t fifo;    // pwm fifo input
+  uint32_t rsv2;    // 4 byte padding
+  uint32_t rng2;    // pwm channel 2 range
+  uint32_t dat2;    // pwm channel 2 data
+} pwm_reg_t;
 
 /**
  * @brief Standard DMA control block specification.
